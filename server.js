@@ -8,9 +8,9 @@ const app = express();
 // CORS configuration for production
 const corsOptions = {
   origin: [
-    'https://srmscetrevents.in',
+    'https://technovaganza-frontend.vercel.app/', // Your Vercel frontend URL
+    'https://srmscetrevents.in', // Your domain
     'https://www.srmscetrevents.in',
-    'https://technovaganza.vercel.app',
     'http://localhost:3000'
   ],
   credentials: true,
