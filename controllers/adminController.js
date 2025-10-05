@@ -73,16 +73,21 @@ const adminLogin = async (req, res) => {
   }
 };
 
-// Create Event (Admin only)
+// Create Event (Admin only) - FIXED
 const createEvent = async (req, res) => {
   try {
-    const { name, type, description, maxParticipants, maxTeamSize } = req.body;
+    const { name, type, description, date, time, venue, maxParticipants, maxTeamSize, minTeamSize, amount } = req.body;
 
-    // Validation
-    if (!name || !type || !description || !maxParticipants) {
+    console.log('📝 Creating event with data:', {
+      name, type, description, date, time, venue, maxParticipants, maxTeamSize, minTeamSize, amount
+    });
+
+    // Enhanced validation
+    if (!name || !type || !description || !date || !time || !venue || !maxParticipants) {
+      console.log('❌ Missing required fields');
       return res.status(400).json({
         success: false,
-        message: 'All fields are required'
+        message: 'All fields are required: name, type, description, date, time, venue, maxParticipants'
       });
     }
 
@@ -90,13 +95,19 @@ const createEvent = async (req, res) => {
       name,
       type,
       description,
+      date,
+      time, 
+      venue,
+      amount: amount || 0,
       maxParticipants,
       maxTeamSize: type === 'team' ? maxTeamSize : 1,
+      minTeamSize: type === 'team' ? minTeamSize : 1,
       createdBy: req.adminId
     });
 
     await event.save();
 
+    console.log('✅ Event created successfully:', event._id);
     res.status(201).json({
       success: true,
       message: 'Event created successfully',
@@ -104,7 +115,7 @@ const createEvent = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Event creation error:', error);
+    console.error('💥 Event creation error:', error);
     res.status(500).json({
       success: false,
       message: 'Server error during event creation'
