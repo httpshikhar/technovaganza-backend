@@ -270,7 +270,34 @@ const deleteEvent = async (req, res) => {
   }
 };
 
-// Export Event Participants
+// Helper function to get event names for a user
+const getUserEventNames = async (userId) => {
+  try {
+    const user = await User.findById(userId).populate('registeredEvents.eventId');
+    if (!user || !user.registeredEvents.length) return 'No events registered';
+    
+    const eventNames = user.registeredEvents.map(reg => 
+      reg.eventId ? reg.eventId.name : 'Unknown Event'
+    );
+    return eventNames.join(', ');
+  } catch (error) {
+    console.error('Error getting user event names:', error);
+    return 'Error fetching events';
+  }
+};
+
+// Helper function to get event name by ID
+const getEventNameById = async (eventId) => {
+  try {
+    const event = await Event.findById(eventId);
+    return event ? event.name : 'Unknown Event';
+  } catch (error) {
+    console.error('Error getting event name:', error);
+    return 'Unknown Event';
+  }
+};
+
+// Export Event Participants - ENHANCED WITH PID AND EVENT NAMES
 const exportEventParticipants = async (req, res) => {
   try {
     const { eventId } = req.params;
@@ -287,43 +314,66 @@ const exportEventParticipants = async (req, res) => {
     let participants = [];
     
     if (event.type === 'solo') {
-      // For solo events, get users registered for this event
+      // For solo events, get users registered for this event with populated events
       const users = await User.find({ 
         'registeredEvents.eventId': eventId,
         ...(college && college !== 'all' ? { college } : {})
-      });
+      }).populate('registeredEvents.eventId');
       
-      participants = users.map(user => ({
-        name: user.name,
-        email: user.email,
-        phone: user.phone,
-        college: user.college,
-        branch: user.branch,
-        batch: user.batch,
-        rollNumber: user.rollNumber,
-        event: event.name,
-        type: 'Solo'
-      }));
+      participants = await Promise.all(
+        users.map(async (user) => {
+          // Get all event names for this user
+          const userEventNames = user.registeredEvents
+            .map(reg => reg.eventId ? reg.eventId.name : 'Unknown Event')
+            .join(', ');
+
+          return {
+            pid: user.pid, // ✅ ADDED PID
+            name: user.name,
+            email: user.email,
+            phone: user.mobile || user.phone, // Handle both field names
+            college: user.college,
+            branch: user.branch,
+            batch: user.batch,
+            rollNumber: user.rollno || user.rollNumber, // Handle both field names
+            event: event.name,
+            allRegisteredEvents: userEventNames, // ✅ ADDED EVENT NAMES
+            type: 'Solo'
+          };
+        })
+      );
     } else {
       // For team events, get teams and their members
-      const teams = await Team.find({ eventId }).populate('members');
+      const teams = await Team.find({ eventId }).populate('members').populate('eventId');
       
-      participants = teams.flatMap(team => 
-        team.members.map(member => ({
-          name: member.name,
-          email: member.email,
-          phone: member.phone,
-          college: member.college,
-          branch: member.branch,
-          batch: member.batch,
-          rollNumber: member.rollNumber,
-          event: event.name,
-          team: team.teamName,
-          type: 'Team'
-        }))
-      ).filter(participant => 
-        !college || college === 'all' || participant.college === college
+      participants = await Promise.all(
+        teams.flatMap(team => 
+          team.members.map(async (member) => {
+            // Get all event names for this member
+            const memberEventNames = await getUserEventNames(member._id);
+            
+            return {
+              pid: member.pid, // ✅ ADDED PID
+              name: member.name,
+              email: member.email,
+              phone: member.mobile || member.phone,
+              college: member.college,
+              branch: member.branch,
+              batch: member.batch,
+              rollNumber: member.rollno || member.rollNumber,
+              event: team.eventId ? team.eventId.name : event.name,
+              team: team.teamName,
+              allRegisteredEvents: memberEventNames, // ✅ ADDED EVENT NAMES
+              type: 'Team'
+            };
+          })
+        )
       );
+
+      // Filter by college if specified
+      if (college && college !== 'all') {
+        participants = participants.filter(participant => participant.college === college);
+      }
     }
 
     // Convert to CSV
@@ -346,46 +396,67 @@ const exportEventParticipants = async (req, res) => {
   }
 };
 
-// Export All Participants
+// Export All Participants - ENHANCED WITH PID AND EVENT NAMES
 const exportAllParticipants = async (req, res) => {
   try {
     const { college } = req.query;
 
-    // Get all users
-    const users = await User.find(college && college !== 'all' ? { college } : {});
+    // Get all users with populated events
+    const users = await User.find(college && college !== 'all' ? { college } : {})
+      .populate('registeredEvents.eventId');
     
-    // Get all team members
-    const teams = await Team.find().populate('members');
-    const teamMembers = teams.flatMap(team => 
-      team.members.map(member => ({
-        ...member.toObject(),
-        teamName: team.teamName,
-        eventId: team.eventId
-      }))
+    // Get all team members with populated events
+    const teams = await Team.find().populate('members').populate('eventId');
+    const teamMembers = await Promise.all(
+      teams.flatMap(team => 
+        team.members.map(async (member) => {
+          const memberEventNames = await getUserEventNames(member._id);
+          return {
+            ...member.toObject(),
+            teamName: team.teamName,
+            eventId: team.eventId ? team.eventId._id : null,
+            eventName: team.eventId ? team.eventId.name : 'Unknown Event',
+            allRegisteredEvents: memberEventNames
+          };
+        })
+      )
     );
 
     // Combine and format data
     const allParticipants = [
-      ...users.map(user => ({
-        name: user.name,
-        email: user.email,
-        phone: user.phone,
-        college: user.college,
-        branch: user.branch,
-        batch: user.batch,
-        rollNumber: user.rollNumber,
-        registeredEvents: user.registeredEvents.length,
-        type: 'User'
-      })),
+      // Users (solo participants)
+      ...users.map(user => {
+        const eventNames = user.registeredEvents
+          .map(reg => reg.eventId ? reg.eventId.name : 'Unknown Event')
+          .join(', ');
+
+        return {
+          pid: user.pid, // ✅ ADDED PID
+          name: user.name,
+          email: user.email,
+          phone: user.mobile || user.phone,
+          college: user.college,
+          branch: user.branch,
+          batch: user.batch,
+          rollNumber: user.rollno || user.rollNumber,
+          registeredEvents: user.registeredEvents.length,
+          eventNames: eventNames, // ✅ ADDED EVENT NAMES
+          type: 'Solo Participant'
+        };
+      }),
+      // Team members
       ...teamMembers.map(member => ({
+        pid: member.pid, // ✅ ADDED PID
         name: member.name,
         email: member.email,
-        phone: member.phone,
+        phone: member.mobile || member.phone,
         college: member.college,
         branch: member.branch,
         batch: member.batch,
-        rollNumber: member.rollNumber,
+        rollNumber: member.rollno || member.rollNumber,
         team: member.teamName,
+        event: member.eventName,
+        allRegisteredEvents: member.allRegisteredEvents, // ✅ ADDED EVENT NAMES
         type: 'Team Member'
       }))
     ].filter(participant => 
@@ -412,50 +483,75 @@ const exportAllParticipants = async (req, res) => {
   }
 };
 
-// Export by College
+// Export by College - ENHANCED WITH PID AND EVENT NAMES
 const exportByCollege = async (req, res) => {
   try {
     const { college } = req.params;
 
-    // Get users from this college
-    const users = await User.find({ college });
+    if (!college || college === 'all') {
+      return res.status(400).json({
+        success: false,
+        message: 'Please specify a college name'
+      });
+    }
+
+    // Get users from this college with populated events
+    const users = await User.find({ college }).populate('registeredEvents.eventId');
     
-    // Get team members from this college
-    const teams = await Team.find().populate('members');
-    const teamMembers = teams.flatMap(team => 
-      team.members
-        .filter(member => member.college === college)
-        .map(member => ({
-          ...member.toObject(),
-          teamName: team.teamName,
-          eventId: team.eventId,
-          eventName: team.eventName
-        }))
+    // Get team members from this college with populated events
+    const teams = await Team.find().populate('members').populate('eventId');
+    const teamMembers = await Promise.all(
+      teams.flatMap(team => 
+        team.members
+          .filter(member => member.college === college)
+          .map(async (member) => {
+            const memberEventNames = await getUserEventNames(member._id);
+            return {
+              ...member.toObject(),
+              teamName: team.teamName,
+              eventId: team.eventId ? team.eventId._id : null,
+              eventName: team.eventId ? team.eventId.name : 'Unknown Event',
+              allRegisteredEvents: memberEventNames
+            };
+          })
+      )
     );
 
     // Combine data
     const collegeParticipants = [
-      ...users.map(user => ({
-        name: user.name,
-        email: user.email,
-        phone: user.phone,
-        college: user.college,
-        branch: user.branch,
-        batch: user.batch,
-        rollNumber: user.rollNumber,
-        registeredEvents: user.registeredEvents.length,
-        type: 'User'
-      })),
+      // Users (solo participants)
+      ...users.map(user => {
+        const eventNames = user.registeredEvents
+          .map(reg => reg.eventId ? reg.eventId.name : 'Unknown Event')
+          .join(', ');
+
+        return {
+          pid: user.pid, // ✅ ADDED PID
+          name: user.name,
+          email: user.email,
+          phone: user.mobile || user.phone,
+          college: user.college,
+          branch: user.branch,
+          batch: user.batch,
+          rollNumber: user.rollno || user.rollNumber,
+          registeredEvents: user.registeredEvents.length,
+          eventNames: eventNames, // ✅ ADDED EVENT NAMES
+          type: 'Solo Participant'
+        };
+      }),
+      // Team members
       ...teamMembers.map(member => ({
+        pid: member.pid, // ✅ ADDED PID
         name: member.name,
         email: member.email,
-        phone: member.phone,
+        phone: member.mobile || member.phone,
         college: member.college,
         branch: member.branch,
         batch: member.batch,
-        rollNumber: member.rollNumber,
+        rollNumber: member.rollno || member.rollNumber,
         team: member.teamName,
         event: member.eventName,
+        allRegisteredEvents: member.allRegisteredEvents, // ✅ ADDED EVENT NAMES
         type: 'Team Member'
       }))
     ];
