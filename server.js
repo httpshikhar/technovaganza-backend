@@ -5,19 +5,26 @@ require('dotenv').config();
 
 const app = express();
 
-// CORS configuration for production
+// Enhanced CORS configuration
 const corsOptions = {
   origin: [
-    'https://technovaganza-frontend.vercel.app/', // Your Vercel frontend URL
-    'https://srmscetrevents.in', // Your domain
+    'https://technovaganza-frontend.vercel.app', // ✅ REMOVED trailing slash
+    'https://srmscetrevents.in',
     'https://www.srmscetrevents.in',
     'http://localhost:3000'
   ],
   credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], // ✅ Added methods
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'], // ✅ Added headers
   optionsSuccessStatus: 200
 };
 
+// Apply CORS middleware
 app.use(cors(corsOptions));
+
+// Handle preflight requests explicitly
+app.options('*', cors(corsOptions)); // ✅ Added preflight handler
+
 app.use(express.json());
 
 // Routes
@@ -51,4 +58,5 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`🌐 CORS enabled for: ${corsOptions.origin.join(', ')}`);
 });
