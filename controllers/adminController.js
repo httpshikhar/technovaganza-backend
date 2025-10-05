@@ -123,17 +123,61 @@ const createEvent = async (req, res) => {
   }
 };
 
-// Get All Events (Admin view - all events)
+// Get All Events (Admin view - all events) - FIXED WITH PARTICIPANT COUNTING
 const getAdminEvents = async (req, res) => {
   try {
+    console.log('📊 Fetching admin events with participant counts...');
     const events = await Event.find().sort({ createdAt: -1 });
     
+    // Get participant counts for each event
+    const eventsWithParticipants = await Promise.all(
+      events.map(async (event) => {
+        try {
+          // Count users registered for this event
+          const participantCount = await User.countDocuments({
+            'registeredEvents.eventId': event._id
+          });
+          
+          // Count teams registered for this event (for team events)
+          const teamCount = await Team.countDocuments({
+            eventId: event._id
+          });
+          
+          // Calculate total participants
+          let totalParticipants = participantCount;
+          if (event.type === 'team') {
+            // For team events, count team members
+            const teams = await Team.find({ eventId: event._id }).populate('members');
+            totalParticipants = teams.reduce((total, team) => total + team.members.length, 0);
+          }
+          
+          console.log(`📊 Event: ${event.name}, Participants: ${totalParticipants}, Teams: ${teamCount}`);
+          
+          return {
+            ...event.toObject(),
+            registeredUsers: participantCount,
+            registeredTeams: teamCount,
+            totalParticipants: totalParticipants
+          };
+        } catch (error) {
+          console.error(`❌ Error counting participants for event ${event._id}:`, error);
+          return {
+            ...event.toObject(),
+            registeredUsers: 0,
+            registeredTeams: 0,
+            totalParticipants: 0
+          };
+        }
+      })
+    );
+    
+    console.log('✅ Admin events fetched successfully');
     res.json({
       success: true,
-      events: events
+      events: eventsWithParticipants
     });
   } catch (error) {
-    console.error('Get admin events error:', error);
+    console.error('💥 Get admin events error:', error);
     res.status(500).json({
       success: false,
       message: 'Server error'
@@ -141,15 +185,40 @@ const getAdminEvents = async (req, res) => {
   }
 };
 
-// Get Statistics
+// Get Statistics - UPDATED WITH BETTER COUNTS
 const getStatistics = async (req, res) => {
   try {
+    console.log('📈 Fetching statistics...');
+    
     const totalUsers = await User.countDocuments();
     const totalEvents = await Event.countDocuments();
     const totalTeams = await Team.countDocuments();
     const activeEvents = await Event.countDocuments({ isActive: true });
     const soloEvents = await Event.countDocuments({ type: 'solo' });
     const teamEvents = await Event.countDocuments({ type: 'team' });
+
+    // Calculate total participants across all events
+    let totalParticipants = 0;
+    const events = await Event.find();
+    for (const event of events) {
+      if (event.type === 'solo') {
+        const count = await User.countDocuments({ 'registeredEvents.eventId': event._id });
+        totalParticipants += count;
+      } else {
+        const teams = await Team.find({ eventId: event._id }).populate('members');
+        totalParticipants += teams.reduce((total, team) => total + team.members.length, 0);
+      }
+    }
+
+    console.log('📈 Statistics calculated:', {
+      totalUsers,
+      totalEvents,
+      totalTeams,
+      activeEvents,
+      soloEvents,
+      teamEvents,
+      totalParticipants
+    });
 
     res.json({
       success: true,
@@ -159,12 +228,13 @@ const getStatistics = async (req, res) => {
         totalTeams,
         activeEvents,
         soloEvents,
-        teamEvents
+        teamEvents,
+        totalParticipants
       }
     });
 
   } catch (error) {
-    console.error('Statistics error:', error);
+    console.error('💥 Statistics error:', error);
     res.status(500).json({
       success: false,
       message: 'Server error'
