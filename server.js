@@ -11,7 +11,7 @@ const corsOptions = {
     'https://technovaganza-frontend.vercel.app', // ✅ REMOVED trailing slash
     'https://srmscetrevents.in',
     'https://www.srmscetrevents.in',
-    'http://localhost:3000'
+    'http://localhost:3000',
   ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], // ✅ Added methods
